@@ -2,7 +2,9 @@ package ynet
 
 import (
 	"github.com/gorilla/websocket"
+	"net"
 	"sync"
+	"yogurt/ysjzx/log"
 )
 
 type WebsocketConnSet map[*websocket.Conn]struct{}
@@ -40,4 +42,42 @@ func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32) *WSC
 	}()
 
 	return wsConn
+}
+
+func (wsConn *WSConn) doDestroy() {
+	wsConn.conn.UnderlyingConn().(*net.TCPConn).SetLinger(0)
+	wsConn.conn.Close()
+
+	if !wsConn.closeFlag {
+		close(wsConn.writeChan)
+		wsConn.closeFlag = true
+	}
+}
+
+func (wsConn *WSConn) Destroy() {
+	wsConn.Lock()
+	defer wsConn.Unlock()
+
+	wsConn.doDestroy()
+}
+
+func (wsConn *WSConn) Close() {
+	wsConn.Lock()
+	defer wsConn.Unlock()
+	if wsConn.closeFlag {
+		return
+	}
+
+	wsConn.doWrite(nil)
+	wsConn.closeFlag = true
+}
+
+func (wsConn *WSConn) doWrite(b []byte) {
+	if len(wsConn.writeChan) == cap(wsConn.writeChan) {
+		log.Debug("close conn: channel full")
+		wsConn.doDestroy()
+		return
+	}
+
+	wsConn.writeChan <- b
 }
